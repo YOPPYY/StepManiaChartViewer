@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>StepMania Chart Viewer (V9.2_20260605)</title>
+    <style>
+        /* デフォルト：ライトモード（背景：薄いグレー） */
+        :root {
+            --bg-color: #f7f7f7;
+            --text-color: #000000;
+            --control-bg: #eaeaea;
+            --control-border: #bbbbbb;
+            --canvas-bg: #f7f7f7;
+            --lane-bg-even: #dcdcdc;   /* 偶数拍の背景（濃いめのグレー） */
+            --lane-bg-odd: #ffffff;    /* 奇数拍の背景（はっきりした白） */
+            --grid-line: #888888;
+            --grid-sub-line: #aaaaaa;  /* 8分割点線用のカラー */
+        }
+
+        /* ダークモード */
+        [data-theme="dark"] {
+            --bg-color: #111111;
+            --text-color: #ffffff;
+            --control-bg: #222222;
+            --control-border: #444444;
+            --canvas-bg: #000000;
+            --lane-bg-even: #1a1a1a;
+            --lane-bg-odd: #111111;
+            --grid-line: #555555;
+            --grid-sub-line: #444444;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: sans-serif;
+            margin: 20px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        #controls {
+            margin-bottom: 20px;
+            background: var(--control-bg);
+            border: 1px solid var(--control-border);
+            padding: 15px;
+            border-radius: 5px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        select, input[type="file"], button {
+            background: var(--bg-color);
+            color: var(--text-color);
+            border: 1px solid var(--control-border);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        input[type="checkbox"] {
+            cursor: pointer;
+            transform: scale(1.1);
+            vertical-align: middle;
+        }
+        .checkbox-label {
+            cursor: pointer;
+            font-size: 0.9rem;
+            user-select: none;
+        }
+        button:hover {
+            filter: brightness(0.9);
+        }
+        /* スクロール可能なコンテナ */
+        #canvas-container {
+            width: 100%;
+            overflow-x: auto;
+            background-color: var(--canvas-bg);
+            padding: 10px;
+            border: 1px solid var(--control-border);
+            box-sizing: border-box;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>SM Chart Renderer (Wiki Style Pro V9.2)</h1>
+    
+    <div id="controls">
+        <div>
+            <label for="fileInput">.smファイル: </label>
+            <input type="file" id="fileInput" accept=".sm">
+        </div>
+        <div>
+            <label for="chartSelect">譜面: </label>
+            <select id="chartSelect" disabled>
+                <option value="">ファイルを選択してください</option>
+            </select>
+        </div>
+        <div>
+            <label for="measuresSelect">1列の小節数: </label>
+            <select id="measuresSelect">
+                <option value="8" selected>8小節</option>
+                <option value="10">10小節</option>
+                <option value="12">12小節</option>
+                <option value="14">14小節</option>
+                <option value="16">16小節</option>
+                <option value="all">すべて（1列モード）</option>
+            </select>
+        </div>
+        <div>
+            <label class="checkbox-label">
+                <input type="checkbox" id="doubleHeightCheck"> 1小節を2倍に伸ばす (8分割点線)
+            </label>
+        </div>
+        <div>
+            <label for="alignSelect">矢印の配置: </label>
+            <select id="alignSelect">
+                <option value="typeA" selected >タイプA (中心合わせ)</option>
+                <option value="typeB">タイプB (上端を線に合わせる)</option>
+            </select>
+        </div>
+        <div>
+            <button id="themeToggle">ダークモード</button>
+        </div>
+        <div>
+            <button id="saveButton" disabled>画像として保存</button>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <canvas id="chartCanvas"></canvas>
+    </div>
+
+<script>
+let globalMusicData = { title: '', artist: '', bpm: '', bpmsRaw: [], freezesRaw: [] };
+let parsedCharts = [];    
+let currentTheme = 'light';
+
+const themeToggle = document.getElementById('themeToggle');
+const measuresSelect = document.getElementById('measuresSelect');
+const doubleHeightCheck = document.getElementById('doubleHeightCheck');
+const alignSelect = document.getElementById('alignSelect');
+const saveButton = document.getElementById('saveButton');
+
+themeToggle.addEventListener('click', () => {
+    if (currentTheme === 'light') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        themeToggle.textContent = 'ライトモード';
+        currentTheme = 'dark';
+    } else {
+        document.documentElement.removeAttribute('data-theme');
+        themeToggle.textContent = 'ダークモード';
+        currentTheme = 'light';
+    }
+    triggerReRender();
+});
+
+measuresSelect.addEventListener('change', triggerReRender);
+doubleHeightCheck.addEventListener('change', triggerReRender);
+alignSelect.addEventListener('change', triggerReRender);
+
+saveButton.addEventListener('click', () => {
+    const canvas = document.getElementById('chartCanvas');
+    const select = document.getElementById('chartSelect');
+    if (!parsedCharts[select.value]) return;
+    
+    const chart = parsedCharts[select.value];
+    const typeStr = chart.stepType === 'dance-double' ? 'DP' : 'SP';
+    
+    const safeTitle = globalMusicData.title.replace(/[^a-zA-Z0-9ぁ-んァ-ヶー一-龠_-]/g, '_');
+    const fileName = `${safeTitle}_[${typeStr}]_${chart.difficulty}.png`;
+    
+    const link = document.createElement('a');
+    link.download = fileName;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+});
+
+document.getElementById('fileInput').addEventListener('change', handleFileSelect, false);
+document.getElementById('chartSelect').addEventListener('change', triggerReRender, false);
+
+function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        
+        globalMusicData = parseMusicInfo(text);
+        parsedCharts = parseAllChartsFromSM(text);
+        
+        const select = document.getElementById('chartSelect');
+        select.innerHTML = '';
+
+        if (parsedCharts.length === 0) {
+            select.innerHTML = '<option value="">有効な譜面が見つかりません</option>';
+            select.disabled = true;
+            saveButton.disabled = true;
+            return;
+        }
+
+        parsedCharts.forEach((chart, index) => {
+            const option = document.createElement('option');
+            option.value = index;
+            const typeStr = chart.stepType === 'dance-double' ? 'DP' : 'SP';
+            option.textContent = `[${typeStr}] ${chart.difficulty} (Lv.${chart.meter})`;
+            select.appendChild(option);
+        });
+
+        select.disabled = false;
+        saveButton.disabled = false;
+        renderChart(parsedCharts[0]);
+    };
+    reader.readAsText(file);
+}
+
+function triggerReRender() {
+    const select = document.getElementById('chartSelect');
+    if (select.value !== "" && parsedCharts[select.value]) {
+        renderChart(parsedCharts[select.value]);
+    }
+}
+
+function parseMusicInfo(text) {
+    const info = { title: 'Unknown', artist: 'Unknown', bpm: 'Unknown', bpmsRaw: [], freezesRaw: [] };
+    
+    const titleMatch = text.match(/#TITLE:(.*?);/i);
+    if (titleMatch) info.title = titleMatch[1].trim();
+
+    const artistMatch = text.match(/#ARTIST:(.*?);/i);
+    if (artistMatch) info.artist = artistMatch[1].trim();
+
+    const bpmsMatch = text.match(/#BPMS:(.*?);/s);
+    if (bpmsMatch) {
+        const entries = bpmsMatch[1].replace(/\s+/g, '').split(',');
+        entries.forEach(e => {
+            const parts = e.split('=');
+            if(parts.length === 2) {
+                info.bpmsRaw.push({ beat: parseFloat(parts[0]), bpm: parseFloat(parts[1]) });
+            }
+        });
+        const bpmList = info.bpmsRaw.map(b => b.bpm);
+        const minBpm = Math.round(Math.min(...bpmList));
+        const maxBpm = Math.round(Math.max(...bpmList));
+        info.bpm = minBpm === maxBpm ? minBpm : `${minBpm} ~ ${maxBpm}`;
+    }
+
+    const freezesMatch = text.match(/#STOPS:(.*?);/s);
+    if (freezesMatch) {
+        const entries = freezesMatch[1].replace(/\s+/g, '').split(',');
+        entries.forEach(e => {
+            const parts = e.split('=');
+            if(parts.length === 2 && parseFloat(parts[1]) > 0) {
+                info.freezesRaw.push({ beat: parseFloat(parts[0]), duration: parseFloat(parts[1]) });
+            }
+        });
+    }
+    return info;
+}
+
+function parseAllChartsFromSM(text) {
+    const cleanText = text.replace(/\/\/.*$/gm, '');
+    const sections = cleanText.split('#NOTES:');
+    if (sections.length < 2) return [];
+
+    const charts = [];
+
+    for (let i = 1; i < sections.length; i++) {
+        const rawNoteData = sections[i].split(';')[0];
+        const parts = rawNoteData.split(':');
+        if (parts.length < 6) continue;
+
+        const stepType = parts[0].trim();   
+        const difficulty = parts[2].trim(); 
+        const meter = parts[3].trim();      
+
+        const notesBody = parts.slice(5).join(':'); 
+        const lines = notesBody.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+        if (stepType !== 'dance-single' && stepType !== 'dance-double') continue;
+
+        const laneCount = stepType === 'dance-double' ? 8 : 4;
+        const measures = [];
+        let currentMeasure = [];
+
+        let steps = 0, jumps = 0, holds = 0, rolls = 0;
+
+        for (let line of lines) {
+            if (line === ',' || line === ';') {
+                measures.push(currentMeasure);
+                currentMeasure = [];
+            } else {
+                const regex = new RegExp(`^[0-4M]{${laneCount}}$`);
+                if (regex.test(line)) {
+                    currentMeasure.push(line);
+
+                    let notesInRow = 0;
+                    for(let l=0; l<laneCount; l++) {
+                        const c = line[l];
+                        if (c === '1' || c === '2' || c === '4') notesInRow++;
+                        if (c === '2') holds++;
+                        if (c === '4') rolls++;
+                    }
+                    if (notesInRow > 0) steps++;
+                    if (notesInRow >= 2) jumps++;
+                }
+            }
+        }
+        if (currentMeasure.length > 0) measures.push(currentMeasure);
+
+        charts.push({
+            stepType, difficulty, meter, laneCount, measures,
+            stats: { steps, jumps, holds, rolls }
+        });
+    }
+    return charts;
+}
+
+function drawArrow(ctx, x, y, size, direction, color) {
+    ctx.save();
+    const scaleX = 0.9;
+    const widthOffset = (size * (1 - scaleX)) / 2;
+    
+    ctx.translate(x + widthOffset + (size * scaleX) / 2, y + size / 2);
+    const angles = [-Math.PI / 2, Math.PI, 0, Math.PI / 2];
+    ctx.rotate(angles[direction]);
+
+    ctx.fillStyle = color;
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)'; 
+    ctx.lineWidth = 1.0;                      
+    ctx.beginPath();
+    
+    const r = size / 2;
+    ctx.moveTo(0, -r);            
+    ctx.lineTo(r * scaleX, 0);             
+    ctx.lineTo(r * 0.4 * scaleX, 0);       
+    ctx.lineTo(r * 0.4 * scaleX, r);       
+    ctx.lineTo(-r * 0.4 * scaleX, r);      
+    ctx.lineTo(-r * 0.4 * scaleX, 0);      
+    ctx.lineTo(-r * scaleX, 0);            
+    ctx.closePath();
+    
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+}
+
+function renderChart(chart) {
+    const canvas = document.getElementById('chartCanvas');
+    const ctx = canvas.getContext('2d');
+    const measures = chart.measures;
+    const laneCount = chart.laneCount;
+
+    const computedStyle = getComputedStyle(document.documentElement);
+    const colorBg = computedStyle.getPropertyValue('--canvas-bg').trim();
+    const colorEven = computedStyle.getPropertyValue('--lane-bg-even').trim();
+    const colorOdd = computedStyle.getPropertyValue('--lane-bg-odd').trim();
+    const colorLine = computedStyle.getPropertyValue('--grid-line').trim();
+    const colorSubLine = computedStyle.getPropertyValue('--grid-sub-line').trim();
+    const colorText = computedStyle.getPropertyValue('--text-color').trim();
+
+    const totalMeasures = measures.length;
+    const measuresConfig = document.getElementById('measuresSelect').value;
+    const isDoubleHeight = document.getElementById('doubleHeightCheck').checked; 
+    const alignConfig = document.getElementById('alignSelect').value; 
+    
+    let measuresPerColumn = 8; 
+    if (measuresConfig === 'all') {
+        measuresPerColumn = totalMeasures; 
+    } else {
+        measuresPerColumn = parseInt(measuresConfig, 10);
+    }
+
+    // --- レイアウトサイズ設定 ---
+    const BASE_MEASURE_HEIGHT = 120; 
+    const MEASURE_HEIGHT = isDoubleHeight ? BASE_MEASURE_HEIGHT * 2 : BASE_MEASURE_HEIGHT; 
+    
+    const NOTE_SIZE = BASE_MEASURE_HEIGHT / 4; 
+    
+    const LANE_GAP = 3;   
+    let LANE_WIDTH = (NOTE_SIZE * laneCount) + (LANE_GAP * (laneCount - 1));
+    const DP_CENTER_GAP = 16; 
+    if (laneCount === 8) LANE_WIDTH += DP_CENTER_GAP;
+
+    // 列の隙間（パディング）を 60px に変更
+    const COLUMN_PADDING = 60; 
+    const LEFT_START_MARGIN = 85; // 左端の余白（BPM情報が収まるよう微調整）
+    
+    const MUSIC_INFO_HEIGHT = 90; 
+    const TOP_MARGIN = 40 + MUSIC_INFO_HEIGHT; 
+    
+    const COLUMN_HEIGHT = MEASURE_HEIGHT * measuresPerColumn;
+    const BOTTOM_MARGIN = 60; 
+    
+    const totalColumns = Math.ceil(totalMeasures / measuresPerColumn);
+
+    // キャンバス全体の正確な幅を計算
+    canvas.width = LEFT_START_MARGIN + totalColumns * LANE_WIDTH + (totalColumns - 1) * COLUMN_PADDING + 40;
+    canvas.height = COLUMN_HEIGHT + TOP_MARGIN + BOTTOM_MARGIN;
+
+    // 1. 全体背景クリア
+    ctx.fillStyle = colorBg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 2. 楽曲情報を最背面に描画
+    ctx.fillStyle = colorText;
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText(globalMusicData.title, LEFT_START_MARGIN, 40);
+    ctx.font = '14px sans-serif';
+    ctx.fillText(`Artist: ${globalMusicData.artist}`, LEFT_START_MARGIN, 65);
+    
+    const typeStr = chart.stepType === 'dance-double' ? 'DP' : 'SP';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(`BPM: ${globalMusicData.bpm}   |   Style: ${typeStr}   |   Difficulty: ${chart.difficulty} (Lv.${chart.meter})`, LEFT_START_MARGIN, 88);
+    
+    ctx.strokeStyle = colorLine;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, TOP_MARGIN - 20); ctx.lineTo(canvas.width, TOP_MARGIN - 20); ctx.stroke();
+
+    // 3. グリッドレイヤーの描画（背景、拍線、小節線、および各種情報）
+    for (let m = 0; m < totalMeasures; m++) {
+        const col = Math.floor(m / measuresPerColumn);
+        const mInCol = m % measuresPerColumn;
+
+        // 全ての描画基準位置（startX）の計算式を完全に統一
+        const startX = LEFT_START_MARGIN + col * (LANE_WIDTH + COLUMN_PADDING);
+        const startY = TOP_MARGIN + (mInCol * MEASURE_HEIGHT);
+
+        // 拍背景色分け（1小節を4等分）
+        const beatHeight = MEASURE_HEIGHT / 4;
+        for (let b = 0; b < 4; b++) {
+            ctx.fillStyle = (b % 2 === 0) ? colorEven : colorOdd;
+            ctx.fillRect(startX, startY + (b * beatHeight), LANE_WIDTH, beatHeight);
+            
+            // 通常の拍区切り線（実線）
+            if (b > 0) {
+                ctx.strokeStyle = colorLine;
+                ctx.lineWidth = 0.5;
+                ctx.setLineDash([]); 
+                ctx.beginPath();
+                ctx.moveTo(startX, startY + (b * beatHeight));
+                ctx.lineTo(startX + LANE_WIDTH, startY + (b * beatHeight));
+                ctx.stroke();
+            }
+
+            // 2倍引き伸ばしONのとき、各拍の中間に8分割の点線を描画
+            if (isDoubleHeight) {
+                ctx.strokeStyle = colorSubLine;
+                ctx.lineWidth = 0.5;
+                ctx.setLineDash([4, 4]); 
+                ctx.beginPath();
+                ctx.moveTo(startX, startY + (b * beatHeight) + (beatHeight / 2));
+                ctx.lineTo(startX + LANE_WIDTH, startY + (b * beatHeight) + (beatHeight / 2));
+                ctx.stroke();
+            }
+        }
+        ctx.setLineDash([]); 
+
+        // 小節線（太線）
+        ctx.strokeStyle = colorLine;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(startX + LANE_WIDTH, startY);
+        ctx.stroke();
+
+        // 小節番号
+        ctx.fillStyle = colorText;
+        ctx.font = '11px sans-serif';
+        ctx.fillText(m + 1, startX - 22, startY + 12);
+
+        if (laneCount === 8) {
+            ctx.fillStyle = colorLine;
+            const centerLineX = startX + (NOTE_SIZE * 4) + (LANE_GAP * 3);
+            ctx.fillRect(centerLineX, startY, DP_CENTER_GAP, MEASURE_HEIGHT);
+        }
+
+        // --- 固定された基準位置 (startX) を使用して、BPM / STOP を正確に描画 ---
+        const measureStartBeat = m * 4;
+        const measureEndBeat = (m + 1) * 4;
+
+        globalMusicData.bpmsRaw.forEach(b => {
+            if (b.beat >= measureStartBeat && b.beat < measureEndBeat) {
+                const beatOffset = b.beat - measureStartBeat;
+                const yPos = startY + (beatOffset / 4) * MEASURE_HEIGHT;
+                ctx.fillStyle = '#ff3333';
+                ctx.font = 'bold 11px sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(`${b.bpm.toFixed(3)}`, startX - 8, yPos + 4);
+                ctx.textAlign = 'left'; // リセット
+                ctx.strokeStyle = 'rgba(255, 51, 51, 0.4)';
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(startX - 5, yPos); ctx.lineTo(startX, yPos); ctx.stroke();
+            }
+        });
+
+        globalMusicData.freezesRaw.forEach(f => {
+            if (f.beat >= measureStartBeat && f.beat < measureEndBeat) {
+                const beatOffset = f.beat - measureStartBeat;
+                const yPos = startY + (beatOffset / 4) * MEASURE_HEIGHT;
+                ctx.fillStyle = '#3333ff';
+                ctx.font = 'bold 11px sans-serif';
+                ctx.fillText(`${f.duration.toFixed(3)}`, startX + LANE_WIDTH + 6, yPos + 4);
+                ctx.strokeStyle = 'rgba(51, 51, 255, 0.4)';
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.moveTo(startX + LANE_WIDTH, yPos); ctx.lineTo(startX + LANE_WIDTH + 5, yPos); ctx.stroke();
+            }
+        });
+    }
+
+    // 各列の最下部の閉じる小節線
+    for (let col = 0; col < totalColumns; col++) {
+        const startX = LEFT_START_MARGIN + col * (LANE_WIDTH + COLUMN_PADDING);
+        const endY = TOP_MARGIN + COLUMN_HEIGHT;
+        ctx.strokeStyle = colorLine;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(startX, endY); ctx.lineTo(startX + LANE_WIDTH, endY); ctx.stroke();
+    }
+
+    // 4. すべての「矢印（ノーツ）」を最前面に描画
+    for (let m = 0; m < totalMeasures; m++) {
+        const col = Math.floor(m / measuresPerColumn);
+        const mInCol = m % measuresPerColumn;
+
+        const startX = LEFT_START_MARGIN + col * (LANE_WIDTH + COLUMN_PADDING);
+        const startY = TOP_MARGIN + (mInCol * MEASURE_HEIGHT);
+
+        const measureData = measures[m];
+        const stepCount = measureData.length;
+        if (stepCount === 0) continue;
+
+        for (let s = 0; s < stepCount; s++) {
+            const line = measureData[s];
+            const yPos = startY + (s / stepCount) * MEASURE_HEIGHT;
+
+            let noteColor = '#999999'; 
+            const pulse = Math.round((s / stepCount) * 48);
+
+            if (pulse % 12 === 0) {
+                noteColor = '#ff3333'; // 4分
+            } else if (pulse % 6 === 0) {
+                noteColor = '#3333ff'; // 8分
+            } else if (pulse % 3 === 0) {
+                noteColor = '#ffff33'; // 16分
+            } else if (pulse % 4 === 0 || pulse % 2 === 0 || pulse % 1 !== 0) {
+                noteColor = '#33cc33'; // 24分・32分等
+            }
+
+            for (let lane = 0; lane < laneCount; lane++) {
+                const char = line[lane];
+                if (char === '1' || char === '2' || char === '4') {
+                    let xOffset = lane * (NOTE_SIZE + LANE_GAP);
+                    if (laneCount === 8 && lane >= 4) xOffset += DP_CENTER_GAP;
+                    const xPos = startX + xOffset;
+                    const direction = lane % 4; 
+
+                    let targetY = yPos - (NOTE_SIZE / 2); // タイプA (中心合わせ)
+                    if (alignConfig === 'typeB') {
+                        targetY = yPos; // タイプB (上端合わせ)
+                    }
+
+                    drawArrow(ctx, xPos, targetY, NOTE_SIZE, direction, noteColor);
+                }
+            }
+        }
+    }
+
+    // 5. 下部の統計情報
+    const statsY = TOP_MARGIN + COLUMN_HEIGHT + 25;
+    ctx.fillStyle = colorLine;
+    ctx.fillRect(0, statsY - 15, canvas.width, 1); 
+
+    ctx.fillStyle = colorText;
+    ctx.font = '12px monospace';
+    const s = chart.stats;
+    const statsText = `Steps: ${s.steps}    Jumps: ${s.jumps}    Holds: ${s.holds}    Rolls: ${s.rolls}`;
+    ctx.fillText(statsText, LEFT_START_MARGIN, statsY + 5);
+}
+</script>
+
+</body>
+</html>
