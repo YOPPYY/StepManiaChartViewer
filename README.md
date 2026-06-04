@@ -1,5 +1,6 @@
 # StepMania Chart Viewer
-# (SM File DDR Chart Renderer [Wiki Style Pro])
+(SM File DDR Chart Renderer [Wiki Style Pro])
+https://yoppyy.github.io/StepManiaChartViewer/
 
 StepManiaの譜面ファイル（`.sm`）を読み込み、DDR（DanceDanceRevolution）のナビゲーションWiki等でおなじみの「縦スクロール形式」に変換して、高解像度な一枚の画像としてレンダリング・保存できるWebアプリケーションです。
 
