@@ -86,7 +86,7 @@
 </head>
 <body>
 
-    <h1>StepMania Chart Viewer (V9.2_20260605)</h1>
+    <h1>StepMania Chart Viewer</h1>
     
     <div id="controls">
         <div>
@@ -118,8 +118,8 @@
         <div>
             <label for="alignSelect">矢印の配置: </label>
             <select id="alignSelect">
-                <option value="typeA" selected >タイプA (中心合わせ)</option>
-                <option value="typeB">タイプB (上端を線に合わせる)</option>
+                <option value="typeA">タイプA (中心合わせ)</option>
+                <option value="typeB" selected>タイプB (上端を線に合わせる)</option>
             </select>
         </div>
         <div>
@@ -383,12 +383,10 @@ function renderChart(chart) {
     
     const LANE_GAP = 3;   
     let LANE_WIDTH = (NOTE_SIZE * laneCount) + (LANE_GAP * (laneCount - 1));
-    const DP_CENTER_GAP = 16; 
-    if (laneCount === 8) LANE_WIDTH += DP_CENTER_GAP;
+    const DP_CENTER_GAP = 0; 
 
-    // 列の隙間（パディング）を 60px に変更
     const COLUMN_PADDING = 60; 
-    const LEFT_START_MARGIN = 85; // 左端の余白（BPM情報が収まるよう微調整）
+    const LEFT_START_MARGIN = 85; 
     
     const MUSIC_INFO_HEIGHT = 90; 
     const TOP_MARGIN = 40 + MUSIC_INFO_HEIGHT; 
@@ -398,7 +396,6 @@ function renderChart(chart) {
     
     const totalColumns = Math.ceil(totalMeasures / measuresPerColumn);
 
-    // キャンバス全体の正確な幅を計算
     canvas.width = LEFT_START_MARGIN + totalColumns * LANE_WIDTH + (totalColumns - 1) * COLUMN_PADDING + 40;
     canvas.height = COLUMN_HEIGHT + TOP_MARGIN + BOTTOM_MARGIN;
 
@@ -421,12 +418,11 @@ function renderChart(chart) {
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(0, TOP_MARGIN - 20); ctx.lineTo(canvas.width, TOP_MARGIN - 20); ctx.stroke();
 
-    // 3. グリッドレイヤーの描画（背景、拍線、小節線、および各種情報）
+    // 3. グリッドレイヤーの描画
     for (let m = 0; m < totalMeasures; m++) {
         const col = Math.floor(m / measuresPerColumn);
         const mInCol = m % measuresPerColumn;
 
-        // 全ての描画基準位置（startX）の計算式を完全に統一
         const startX = LEFT_START_MARGIN + col * (LANE_WIDTH + COLUMN_PADDING);
         const startY = TOP_MARGIN + (mInCol * MEASURE_HEIGHT);
 
@@ -473,13 +469,7 @@ function renderChart(chart) {
         ctx.font = '11px sans-serif';
         ctx.fillText(m + 1, startX - 22, startY + 12);
 
-        if (laneCount === 8) {
-            ctx.fillStyle = colorLine;
-            const centerLineX = startX + (NOTE_SIZE * 4) + (LANE_GAP * 3);
-            ctx.fillRect(centerLineX, startY, DP_CENTER_GAP, MEASURE_HEIGHT);
-        }
-
-        // --- 固定された基準位置 (startX) を使用して、BPM / STOP を正確に描画 ---
+        // BPM / STOP情報の描画
         const measureStartBeat = m * 4;
         const measureEndBeat = (m + 1) * 4;
 
@@ -491,7 +481,7 @@ function renderChart(chart) {
                 ctx.font = 'bold 11px sans-serif';
                 ctx.textAlign = 'right';
                 ctx.fillText(`${b.bpm.toFixed(3)}`, startX - 8, yPos + 4);
-                ctx.textAlign = 'left'; // リセット
+                ctx.textAlign = 'left'; 
                 ctx.strokeStyle = 'rgba(255, 51, 51, 0.4)';
                 ctx.lineWidth = 1;
                 ctx.beginPath(); ctx.moveTo(startX - 5, yPos); ctx.lineTo(startX, yPos); ctx.stroke();
@@ -558,9 +548,9 @@ function renderChart(chart) {
                     const xPos = startX + xOffset;
                     const direction = lane % 4; 
 
-                    let targetY = yPos - (NOTE_SIZE / 2); // タイプA (中心合わせ)
+                    let targetY = yPos - (NOTE_SIZE / 2); 
                     if (alignConfig === 'typeB') {
-                        targetY = yPos; // タイプB (上端合わせ)
+                        targetY = yPos; 
                     }
 
                     drawArrow(ctx, xPos, targetY, NOTE_SIZE, direction, noteColor);
